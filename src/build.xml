@@ -1,5 +1,12 @@
 <project name="Get all DataTypes" default="refresh_book" basedir="." xmlns:sf="antlib:com.salesforce">
 
+	<!-- load properties -->
+	<property environment="env" />
+	<property file="conf/build.properties" />
+	<property file="conf/package.properties" />
+	<!-- svn libs -->
+	<property name="lib.svn.ant" value="./lib/svn" />
+
 	<!-- ant contrib -->
 	<taskdef resource="net/sf/antcontrib/antlib.xml">
 		<classpath>
@@ -14,88 +21,108 @@
 		</classpath>
 	</taskdef>
 
-	<property file="conf/build.properties" />
-	<property file="conf/package.properties" />
-	<property environment="env" />
-	
+	<!-- path to the svnant libraries -->
+	<path id="svnant.classpath">
+		<fileset dir="${lib.svn.ant}">
+			<include name="**/*.jar" />
+		</fileset>
+	</path>
+
+	<!-- load the svn task -->
+	<typedef resource="org/tigris/subversion/svnant/svnantlib.xml" classpathref="svnant.classpath" />
+
+	<!--svn Settings -->
+	<svnSetting id="svn.settings" svnkit="false" javahl="false" username="${svn.user}" password="${svn.passwd}" />
+
 	<!-- set session ID after login-->
 	<condition property="sfdc.sessionId" value="">
 		<not>
 			<isset property="sfdc.sessionId" />
 		</not>
 	</condition>
-	
+
 	<!-- check variables jenkins -->
 	<if>
 		<not>
-			<isset property="env.WORKSPACE"/>
+			<isset property="env.WORKSPACE" />
 		</not>
 		<then>
-	        <property name="svn.repositorio" value="${metadata.destination}"/>
-	    </then>
+			<property name="svn.message" value="LOCAL UPDATE" />
+		</then>
 		<else>
-			<property name="svn.repositorio" value="${env.WORKSPACE}\${env.JOB_NAME}\src"/>
+			<property name="svn.message" value=" BUILD ${env.BUILD_NUMBER} - URL ${env.BUILD_URL}" />
 		</else>
 	</if>
-	
-	<!-- clean old data -->
-	<target name="clean">
-		<delete dir="${metadata.result.dir}" />
-	</target>
-	
-	<!-- setup  -->
-	<target name="setup">
-		<mkdir dir="${metadata.result.dir}" />
+
+	<!--- *************************************************************************************************************************	-->
+	<!--- ******************************************* TASKS ***********************************************************************	-->
+	<!--- *************************************************************************************************************************	-->
+
+	<!-- busca os tipos de objetos usando book api -->
+	<target name="refresh_book" depends="checkout,describeMetadata">
+
+		<foreach list="${metadata.type}" param="value" delimiter="," 
+			target="getmetadata" parallel="true" maxThreads="5" trim="true" />
+
+		<antcall target="commit"/>
 	</target>
 
+	<!-- checkout project from svn -->
+	<target name="checkout" depends="clean">
+		<mkdir dir="${work.dir}" />
+		<!-- checkut project from svn -->
+		<echo message="Checkut project ${svn.url}" />
+		<svn refid="svn.settings" logFile="${work.dir}/svn_checkout.log">
+			<checkout url="${svn.url}" depth="infinity" revision="HEAD" destPath="${work.dir}" />
+		</svn>
+	</target>
+
+	<!-- clean old data -->
+	<target name="clean">
+		<delete dir="${work.dir}" />
+	</target>
+
+	<!-- Describe Metadata -->
+	<target name="describeMetadata">
+		<sf:describeMetadata username="${sfdc.username}" password="${sfdc.password}" 
+			sessionId="${sfdc.sessionId}" serverurl="${sfdc.serverurl}" 
+			resultFilePath="${work.dir}/describe.txt" />
+	</target>
+
+	<!-- faz o download do metadata de acordo com o tipo -->
+	<target name="getmetadata">
+		<echo message="GET META DATA --> ${value}" />
+
+		<sf:bulkRetrieve username="${sfdc.username}" password="${sfdc.password}" sessionId="${sfdc.sessionId}" 
+			serverurl="${sfdc.serverurl}" maxPoll="${sfdc.maxPoll}" metadataType="${value}" 
+			batchSize="${sfdc.batchSize}" retrieveTarget="${work.dir}\src" />
+
+	</target>
+
+	<!-- commit changes -->
+	<target name="commit">
+		
+		<tstamp>
+			<format property="TODAY" pattern="yyyy-MM-dd .. hh:mm" locale="pt,BR" />
+		</tstamp>
+		
+		<echo message="Commit change ${TODAY}" />
+
+		<svn refid="svn.settings">
+			<revert file="${work.dir}/src/package.xml" revision="HEAD"/>
+			<commit message="UPDATE ${env.COMPUTERNAME}@${env.USERNAME} Date ${TODAY} - ${svn.message}" dir="${work.dir}/src" />
+		</svn>
+	</target>
+	
 	<!-- The file unpackaged/package.xml lists what is to be retrieved -->
-	<target name="refresh" depends="clean,setup,DescribeMetadata">
+	<!--
+	<target name="refresh" depends="clean">
 		
 		<sf:retrieve username="${sfdc.username}"   password="${sfdc.password}" 	sessionId="${sfdc.sessionId}" 
 					 serverurl="${sfdc.serverurl}" maxPoll="${sfdc.maxPoll}" 	 
 					 pollWaitMillis="${sdfc.pollWaitMillis}" unpackaged="${sfdc.xml.metadata}"
 					 retrieveTarget="${metadata.result.dir}"/>
 	</target>
-
-	<!-- busca os tipos de objetos usando book api -->
-	<target name="refresh_book" depends="clean,setup,DescribeMetadata">
-		
-		<foreach list="${metadata.type}" param="value" delimiter=","
-			target="getmetadata" parallel="true" maxThreads="5" trim="true"/>
-
-		<delete file="${metadata.result.dir}/package.xml"/>
-		
-		<antcall target="updateSvn"/>
-	</target>
-	
-	<!-- faz o download do metadata de acordo com o tipo -->
-	<target name="getmetadata">
-		<echo message="GET META DATA --> ${value}"/>
-		
-		<sf:bulkRetrieve username="${sfdc.username}" password="${sfdc.password}" 
-			sessionId="${sfdc.sessionId}" serverurl="${sfdc.serverurl}" 
-			maxPoll="${sfdc.maxPoll}" 	metadataType="${value}" 
-			batchSize="${sfdc.batchSize}" retrieveTarget="${metadata.result.dir}" />
-		
-	</target>
-	
-	<!-- Describe Metadata -->
-	<target name="DescribeMetadata">
-		<sf:describeMetadata username="${sfdc.username}" password="${sfdc.password}" 
-					sessionId="${sfdc.sessionId}" serverurl="${sfdc.serverurl}" 
-					resultFilePath="${metadata.result.dir}/describe.txt"/>
-	</target>
-	
-	<!-- atualiza o repositorio do svn -->
-	<target name="updateSvn">
-		<echo message="Atualizando Repositório SVN: ${svn.repositorio}"/>
-		
-		<move file="${metadata.result.dir}" todir="${svn.repositorio}" 
-				overwrite="true" includeEmptyDirs="yes" verbose="true"/>
-	</target>
-
-	<!-- logType = None (Default), Detail, Debugonly -->
-	<!--
 	<target name="runTests">
 		<sf:deploy username="${sfdc.username}"   password="${sfdc.password}" sessionId="${sfdc.sessionId}" serverurl="${sfdc.serverurl}"
 				   deployroot="srctests" testLevel="RunAllTestsInOrg"
