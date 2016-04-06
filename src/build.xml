@@ -17,7 +17,7 @@
 	<!-- the salesforce ant_lib it was copied to folder ant lib -->
 	<taskdef resource="com/salesforce/antlib.xml" uri="antlib:com.salesforce">
 		<classpath>
-			<pathelement location="lib/ant-salesforce.jar" />
+			<pathelement location="lib/ant-salesforce_36.jar" />
 		</classpath>
 	</taskdef>
 
@@ -53,14 +53,18 @@
 			<property name="svn.message" value=" BUILD ${env.BUILD_NUMBER} - URL ${env.BUILD_URL}" />
 		</else>
 	</if>
-
+	
+	<!-- check svn local repository -->
+	<condition property="work.dir.exists" value="true" else="false">
+		<available file="${work.dir}" type="dir"/>
+	</condition>
+	
 	<!--- *************************************************************************************************************************	-->
 	<!--- ******************************************* TASKS ***********************************************************************	-->
 	<!--- *************************************************************************************************************************	-->
 
 	<!-- busca os tipos de objetos usando book api -->
-	<target name="refresh_book" depends="checkout,describeMetadata">
-
+	<target name="refresh_book"	depends="checkout,update,describeMetadata">
 		<foreach list="${metadata.type}" param="value" delimiter="," 
 			target="getmetadata" parallel="true" maxThreads="5" trim="true" />
 
@@ -68,7 +72,8 @@
 	</target>
 
 	<!-- checkout project from svn -->
-	<target name="checkout" depends="clean">
+	<target name="checkout" unless="${work.dir.exists}">
+		<delete dir="${work.dir}" />
 		<mkdir dir="${work.dir}" />
 		<!-- checkut project from svn -->
 		<echo message="Checkut project ${svn.url}" />
@@ -76,10 +81,14 @@
 			<checkout url="${svn.url}" depth="infinity" revision="HEAD" destPath="${work.dir}" />
 		</svn>
 	</target>
-
-	<!-- clean old data -->
-	<target name="clean">
-		<delete dir="${work.dir}" />
+	
+	<!-- update project from svn -->
+	<target name="update" if="${work.dir.exists}">
+		<!-- update project from svn -->
+		<echo message="Update project ${svn.url}" />
+		<svn refid="svn.settings" logFile="${work.dir}/svn_update.log">
+			<update dir="${work.dir}" revision="HEAD" recurse="true" />
+		</svn>
 	</target>
 
 	<!-- Describe Metadata -->
@@ -103,20 +112,22 @@
 	<target name="commit">
 		
 		<tstamp>
-			<format property="TODAY" pattern="yyyy-MM-dd .. hh:mm" locale="pt,BR" />
+			<format property="TODAY" pattern="yyyy-MM-dd hh:mm" locale="pt,BR" />
 		</tstamp>
 		
 		<echo message="Commit change ${TODAY}" />
 
 		<svn refid="svn.settings">
-			<revert file="${work.dir}/src/package.xml" revision="HEAD"/>
-			<commit message="UPDATE ${env.COMPUTERNAME}@${env.USERNAME} Date ${TODAY} - ${svn.message}" dir="${work.dir}/src" />
+			<revert file="${work.dir}/src/package.xml"/>
+			<add dir="${work.dir}/src" recurse="true" force="true"/>
+			<commit dir="${work.dir}/src" message="UPDATE ${env.COMPUTERNAME}@${env.USERNAME} Data ${TODAY} - ${svn.message}"/>
 		</svn>
+
 	</target>
 	
 	<!-- The file unpackaged/package.xml lists what is to be retrieved -->
 	<!--
-	<target name="refresh" depends="clean">
+	<target name="refresh">
 		
 		<sf:retrieve username="${sfdc.username}"   password="${sfdc.password}" 	sessionId="${sfdc.sessionId}" 
 					 serverurl="${sfdc.serverurl}" maxPoll="${sfdc.maxPoll}" 	 
