@@ -87,6 +87,7 @@
 		<!-- update project from svn -->
 		<echo message="Update project ${svn.url}" />
 		<svn refid="svn.settings" logFile="${work.dir}/svn_update.log">
+			<cleanup dir="${work.dir}"/>
 			<update dir="${work.dir}" revision="HEAD" recurse="true" />
 		</svn>
 	</target>
